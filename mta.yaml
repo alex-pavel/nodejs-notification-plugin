@@ -1,0 +1,116 @@
+_schema-version: 3.3.0
+ID: notifications_test
+description: A simple CAP project.
+version: 1.0.0
+modules:
+  - name: notifications_test-srv
+    type: nodejs
+    path: gen/srv
+    requires:
+      - name: notifications_test-destination
+      - name: notifications_test-db
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    parameters:
+      buildpack: nodejs_buildpack
+      readiness-health-check-http-endpoint: /health
+      readiness-health-check-type: http
+    build-parameters:
+      builder: npm
+  - name: notifications_test-db-deployer
+    type: hdb
+    path: gen/db
+    requires:
+      - name: notifications_test-db
+    parameters:
+      buildpack: nodejs_buildpack
+  - name: notification-content-deployment
+    type: nodejs
+    path: gen/srv
+    requires:
+      - name: notifications_test-destination
+      - name: notifications_test-auth
+      - name: notifications_test-db
+    parameters:
+      disk-quota: 1GB
+      memory: 256MB
+      no-route: true
+      no-start: true
+      tasks:
+        - command: node node_modules/@cap-js/notifications/lib/content-deployment.js
+          disk-quota: 1GB
+          memory: 256MB
+          name: notification-content-deployment
+  - name: notifications_test-app-content
+    type: com.sap.application.content
+    path: .
+    requires:
+      - name: notifications_test-repo-host
+        parameters:
+          content-target: true
+    build-parameters:
+      build-result: resources
+      requires:
+        - artifacts:
+            - project1.zip
+          name: project1
+          target-path: resources/
+  - name: project1
+    type: html5
+    path: app/project1
+    build-parameters:
+      build-result: dist
+      builder: custom
+      commands:
+        - npm install
+        - npm run build:cf
+      supported-platforms:
+        []
+resources:
+  - name: notifications_test-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      config:
+        HTML5Runtime_enabled: false
+        init_data:
+          instance:
+            destinations:
+              - Authentication: NoAuthentication
+                Name: ui5
+                ProxyType: Internet
+                Type: HTTP
+                URL: https://ui5.sap.com
+            existing_destinations_policy: update
+      service: destination
+      service-plan: lite
+  - name: notifications_test-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+  - name: notifications_test-repo-host
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: html5-apps-repo
+      service-name: notifications_test-html5-srv
+      service-plan: app-host
+  - name: notifications_test-auth
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: notifications_test-${org}-${space}
+        tenant-mode: dedicated
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npx cds build --production
